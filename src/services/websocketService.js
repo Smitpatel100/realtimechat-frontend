@@ -1,16 +1,24 @@
 import { Client } from '@stomp/stompjs'
+import SockJS from 'sockjs-client'
 
 let stompClient = null
-let subscription = null
-let messageCallback = null
+let currentSubscription = null
+let onMessageCallback = null
 
 const websocketService = {
 
-  connect(roomId) {
+  connect(roomId, onMessageReceived) {
+    onMessageCallback = onMessageReceived
+
+    if (stompClient) {
+      stompClient.deactivate()
+      stompClient = null
+    }
+
     const token = localStorage.getItem('token')
 
     stompClient = new Client({
-      brokerURL: 'ws://localhost:8080/ws',
+      webSocketFactory: () => new SockJS('http://localhost:8080/ws'),
 
       connectHeaders: {
         Authorization: token ? `Bearer ${token}` : '',
@@ -19,24 +27,32 @@ const websocketService = {
       reconnectDelay: 5000,
 
       onConnect: () => {
-        console.log('WebSocket connected')
-        subscription = stompClient.subscribe(
+        if (currentSubscription) {
+          currentSubscription.unsubscribe()
+          currentSubscription = null
+        }
+
+        currentSubscription = stompClient.subscribe(
           `/topic/chat/${roomId}`,
-          (message) => {
-            if (messageCallback) {
-              const parsed = JSON.parse(message.body)
-              messageCallback(parsed)
+          (frame) => {
+            try {
+              const message = JSON.parse(frame.body)
+              if (onMessageCallback) {
+                onMessageCallback(message)
+              }
+            } catch (e) {
+              console.error('Failed to parse incoming message', e)
             }
           }
         )
       },
 
-      onDisconnect: () => {
-        console.log('WebSocket disconnected')
-      },
-
       onStompError: (frame) => {
         console.error('STOMP error', frame)
+      },
+
+      onWebSocketError: (error) => {
+        console.error('WebSocket error', error)
       },
     })
 
@@ -44,30 +60,31 @@ const websocketService = {
   },
 
   disconnect() {
-    if (subscription) {
-      subscription.unsubscribe()
-      subscription = null
+    if (currentSubscription) {
+      currentSubscription.unsubscribe()
+      currentSubscription = null
     }
     if (stompClient) {
       stompClient.deactivate()
       stompClient = null
     }
-    messageCallback = null
+    onMessageCallback = null
   },
 
   sendMessage(roomId, content) {
-    if (stompClient && stompClient.connected) {
-      stompClient.publish({
-        destination: `/app/chat.send/${roomId}`,
-        body: JSON.stringify({ content }),
-      })
-    } else {
-      console.error('WebSocket is not connected')
+    if (!stompClient || !stompClient.connected) {
+      console.error('WebSocket not connected')
+      return
     }
+
+    stompClient.publish({
+      destination: `/app/chat.send/${roomId}`,
+      body: JSON.stringify({ content }),
+    })
   },
 
-  subscribe(callback) {
-    messageCallback = callback
+  isConnected() {
+    return stompClient !== null && stompClient.connected
   },
 }
 

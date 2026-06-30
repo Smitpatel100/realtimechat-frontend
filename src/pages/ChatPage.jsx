@@ -1,8 +1,9 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import useAuth from '../context/useAuth'
 import authService from '../services/authService'
 import chatService from '../services/chatService'
+import websocketService from '../services/websocketService'
 import Sidebar from '../components/chat/Sidebar'
 import ChatHeader from '../components/chat/ChatHeader'
 import MessageList from '../components/chat/MessageList'
@@ -18,7 +19,8 @@ const ChatPage = () => {
   const [selectedRoom, setSelectedRoom] = useState(null)
   const [messages, setMessages] = useState([])
   const [messagesLoading, setMessagesLoading] = useState(false)
-  const [sending, setSending] = useState(false)
+
+  const selectedRoomRef = useRef(null)
 
   useEffect(() => {
     authService.getMe()
@@ -28,37 +30,46 @@ const ChatPage = () => {
     chatService.getRooms()
       .then((res) => setRooms(res.data))
       .catch(() => {})
+
+    return () => {
+      websocketService.disconnect()
+    }
   }, [])
 
-  const loadMessages = useCallback((room) => {
+  const handleIncomingMessage = (message) => {
+    if (!selectedRoomRef.current) return
+    if (message.roomId !== selectedRoomRef.current.id) return
+
+    setMessages((prev) => {
+      if (prev.some((m) => m.id === message.id)) return prev
+      return [...prev, message]
+    })
+  }
+
+  const handleSelectRoom = (room) => {
+    websocketService.disconnect()
+
+    setSelectedRoom(room)
+    selectedRoomRef.current = room
+    setMessages([])
+
     setMessagesLoading(true)
     chatService.getMessages(room.id)
       .then((res) => setMessages(res.data))
       .catch(() => setMessages([]))
       .finally(() => setMessagesLoading(false))
-  }, [])
 
-  const handleSelectRoom = (room) => {
-    setSelectedRoom(room)
-    setMessages([])
-    loadMessages(room)
+    websocketService.connect(room.id, handleIncomingMessage)
   }
 
-  const handleSend = async (content) => {
-    if (!selectedRoom || sending) return
-    setSending(true)
-    try {
-      await chatService.sendMessage(selectedRoom.id, content)
-      const res = await chatService.getMessages(selectedRoom.id)
-      setMessages(res.data)
-    } catch (err) {
-      console.error('Failed to send message', err)
-    } finally {
-      setSending(false)
-    }
+  const handleSend = (content) => {
+    if (!selectedRoom) return
+    if (!content.trim()) return
+    websocketService.sendMessage(selectedRoom.id, content)
   }
 
   const handleLogout = () => {
+    websocketService.disconnect()
     logout()
     navigate('/login')
   }
@@ -87,7 +98,7 @@ const ChatPage = () => {
               currentUserEmail={currentUser?.email}
               loading={messagesLoading}
             />
-            <MessageInput onSend={handleSend} disabled={sending} />
+            <MessageInput onSend={handleSend} disabled={false} />
           </>
         )}
       </div>
