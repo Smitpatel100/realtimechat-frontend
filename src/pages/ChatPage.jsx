@@ -4,6 +4,7 @@ import useAuth from '../context/useAuth'
 import authService from '../services/authService'
 import chatService from '../services/chatService'
 import websocketService from '../services/websocketService'
+import presenceService from '../services/presenceService'
 import Sidebar from '../components/chat/Sidebar'
 import ChatHeader from '../components/chat/ChatHeader'
 import MessageList from '../components/chat/MessageList'
@@ -19,6 +20,7 @@ const ChatPage = () => {
   const [selectedRoom, setSelectedRoom] = useState(null)
   const [messages, setMessages] = useState([])
   const [messagesLoading, setMessagesLoading] = useState(false)
+  const [onlineEmails, setOnlineEmails] = useState(new Set())
 
   const selectedRoomRef = useRef(null)
 
@@ -31,8 +33,25 @@ const ChatPage = () => {
       .then((res) => setRooms(res.data))
       .catch(() => {})
 
+    presenceService.getInitialOnlineUsers()
+      .then((res) => setOnlineEmails(new Set(res.data)))
+      .catch(() => {})
+
+    presenceService.connect((presence) => {
+      setOnlineEmails((prev) => {
+        const next = new Set(prev)
+        if (presence.online) {
+          next.add(presence.email)
+        } else {
+          next.delete(presence.email)
+        }
+        return next
+      })
+    })
+
     return () => {
       websocketService.disconnect()
+      presenceService.disconnect()
     }
   }, [])
 
@@ -70,6 +89,7 @@ const ChatPage = () => {
 
   const handleLogout = () => {
     websocketService.disconnect()
+    presenceService.disconnect()
     logout()
     navigate('/login')
   }
@@ -82,6 +102,8 @@ const ChatPage = () => {
         selectedRoom={selectedRoom}
         onSelectRoom={handleSelectRoom}
         onLogout={handleLogout}
+        onlineEmails={onlineEmails}
+        currentUserEmail={currentUser?.email}
       />
 
       <div className="chat-main">
@@ -92,7 +114,7 @@ const ChatPage = () => {
           </div>
         ) : (
           <>
-            <ChatHeader room={selectedRoom} />
+            <ChatHeader room={selectedRoom} onlineEmails={onlineEmails} />
             <MessageList
               messages={messages}
               currentUserEmail={currentUser?.email}
