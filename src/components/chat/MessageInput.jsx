@@ -1,6 +1,6 @@
 import { useState } from 'react'
 
-const MessageInput = ({ onSend, disabled }) => {
+const MessageInput = ({ onSend, onTyping, disabled }) => {
   const [value, setValue] = useState('')
 
   const handleSend = () => {
@@ -17,6 +17,13 @@ const MessageInput = ({ onSend, disabled }) => {
     }
   }
 
+  const handleChange = (e) => {
+    setValue(e.target.value)
+    if (onTyping) {
+      onTyping()
+    }
+  }
+
   return (
     <div className="message-input-container">
       <input
@@ -24,7 +31,7 @@ const MessageInput = ({ onSend, disabled }) => {
         type="text"
         placeholder="Type a message..."
         value={value}
-        onChange={(e) => setValue(e.target.value)}
+        onChange={handleChange}
         onKeyDown={handleKeyDown}
         disabled={disabled}
       />

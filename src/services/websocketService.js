@@ -41,7 +41,7 @@ const websocketService = {
                 onMessageCallback(message)
               }
             } catch (e) {
-              console.error('Failed to parse incoming message', e)
+              console.error('Failed to parse message', e)
             }
           }
         )
@@ -81,6 +81,19 @@ const websocketService = {
       destination: `/app/chat.send/${roomId}`,
       body: JSON.stringify({ content }),
     })
+  },
+
+  sendTyping(roomId, typing) {
+    if (!stompClient || !stompClient.connected) return
+
+    stompClient.publish({
+      destination: `/app/chat.typing/${roomId}`,
+      body: JSON.stringify({ typing }),
+    })
+  },
+
+  getClient() {
+    return stompClient
   },
 
   isConnected() {

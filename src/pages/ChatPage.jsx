@@ -5,6 +5,7 @@ import authService from '../services/authService'
 import chatService from '../services/chatService'
 import websocketService from '../services/websocketService'
 import presenceService from '../services/presenceService'
+import typingService from '../services/typingService'
 import Sidebar from '../components/chat/Sidebar'
 import ChatHeader from '../components/chat/ChatHeader'
 import MessageList from '../components/chat/MessageList'
@@ -21,12 +22,17 @@ const ChatPage = () => {
   const [messages, setMessages] = useState([])
   const [messagesLoading, setMessagesLoading] = useState(false)
   const [onlineEmails, setOnlineEmails] = useState(new Set())
+  const [typingUsers, setTypingUsers] = useState({})
 
   const selectedRoomRef = useRef(null)
+  const currentUserRef = useRef(null)
 
   useEffect(() => {
     authService.getMe()
-      .then((res) => setCurrentUser(res.data))
+      .then((res) => {
+        setCurrentUser(res.data)
+        currentUserRef.current = res.data
+      })
       .catch(() => {})
 
     chatService.getRooms()
@@ -52,6 +58,7 @@ const ChatPage = () => {
     return () => {
       websocketService.disconnect()
       presenceService.disconnect()
+      typingService.unsubscribe()
     }
   }, [])
 
@@ -65,12 +72,29 @@ const ChatPage = () => {
     })
   }
 
+  const handleTypingUpdate = (typingMessage) => {
+    const currentEmail = currentUserRef.current?.email
+    if (typingMessage.senderEmail === currentEmail) return
+
+    setTypingUsers((prev) => {
+      const next = { ...prev }
+      if (typingMessage.typing) {
+        next[typingMessage.senderEmail] = typingMessage.senderUsername
+      } else {
+        delete next[typingMessage.senderEmail]
+      }
+      return next
+    })
+  }
+
   const handleSelectRoom = (room) => {
+    typingService.unsubscribe()
     websocketService.disconnect()
 
     setSelectedRoom(room)
     selectedRoomRef.current = room
     setMessages([])
+    setTypingUsers({})
 
     setMessagesLoading(true)
     chatService.getMessages(room.id)
@@ -79,19 +103,38 @@ const ChatPage = () => {
       .finally(() => setMessagesLoading(false))
 
     websocketService.connect(room.id, handleIncomingMessage)
+
+    setTimeout(() => {
+      typingService.subscribeToRoom(room.id, handleTypingUpdate)
+    }, 500)
   }
 
   const handleSend = (content) => {
     if (!selectedRoom) return
     if (!content.trim()) return
+    typingService.stopTyping(selectedRoom.id)
     websocketService.sendMessage(selectedRoom.id, content)
   }
 
+  const handleTyping = () => {
+    if (!selectedRoom) return
+    typingService.sendTyping(selectedRoom.id)
+  }
+
   const handleLogout = () => {
+    typingService.unsubscribe()
     websocketService.disconnect()
     presenceService.disconnect()
     logout()
     navigate('/login')
+  }
+
+  const typingText = () => {
+    const names = Object.values(typingUsers)
+    if (names.length === 0) return null
+    if (names.length === 1) return `${names[0]} is typing...`
+    if (names.length === 2) return `${names[0]} and ${names[1]} are typing...`
+    return 'Several people are typing...'
   }
 
   return (
@@ -103,7 +146,6 @@ const ChatPage = () => {
         onSelectRoom={handleSelectRoom}
         onLogout={handleLogout}
         onlineEmails={onlineEmails}
-        currentUserEmail={currentUser?.email}
       />
 
       <div className="chat-main">
@@ -120,7 +162,19 @@ const ChatPage = () => {
               currentUserEmail={currentUser?.email}
               loading={messagesLoading}
             />
-            <MessageInput onSend={handleSend} disabled={false} />
+            {typingText() && (
+              <div className="typing-indicator">
+                <span className="typing-dots">
+                  <span /><span /><span />
+                </span>
+                {typingText()}
+              </div>
+            )}
+            <MessageInput
+              onSend={handleSend}
+              onTyping={handleTyping}
+              disabled={false}
+            />
           </>
         )}
       </div>
